@@ -1,3 +1,5 @@
+using ConcurrencyLab.Services;
+
 namespace ConcurrencyLab.Endpoints;
 
 public static class SharedStateEndpoints
@@ -81,6 +83,36 @@ public static class SharedStateEndpoints
                 Actual = counter,
                 Correct = counter == 10 * iterations,
                 Tradeoff = "Safer than Interlocked for multi-step operations, but slower due to contention."
+            };
+        });
+
+        // LESSON: lock on a real stateful service — BankAccountService guards
+        // its balance with a private lock. Concurrent Transfer calls remain
+        // consistent because each read-modify-write happens inside the lock.
+        group.MapGet("/account", async (BankAccountService account) =>
+        {
+            const int transfersPerSide = 1_000;
+            var startingBalance = account.Balance;
+
+            var deposits = Enumerable.Range(0, transfersPerSide)
+                .Select(_ => Task.Run(() => account.Transfer(1m)));
+            var withdrawals = Enumerable.Range(0, transfersPerSide)
+                .Select(_ => Task.Run(() => account.Transfer(-1m)));
+
+            await Task.WhenAll(deposits.Concat(withdrawals));
+
+            var endingBalance = account.Balance;
+
+            return new
+            {
+                Lesson = "lock on an injected service — Transfer is critical-section safe.",
+                StartingBalance = startingBalance,
+                Deposits = transfersPerSide,
+                Withdrawals = transfersPerSide,
+                EndingBalance = endingBalance,
+                Consistent = endingBalance == startingBalance,
+                Tradeoff = "Encapsulating the lock inside the service keeps callers simple, " +
+                           "but every public method serializes on the same lock."
             };
         });
 
